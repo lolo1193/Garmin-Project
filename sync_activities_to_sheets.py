@@ -14,7 +14,7 @@ import os
 import glob
 import json
 from datetime import datetime
-from typing import List, Any
+from typing import List, Any, Dict
 
 import gspread
 
@@ -27,6 +27,7 @@ WORKSHEET_NAME   = "Global activity details"
 # Chemin corrigé : utiliser slash ou raw string avec une seule paire de backslashes
 ACTIVITIES_DIR   = "C:/Users/loys_/HealthData/FitFiles/Activities"
 CHUNK_SIZE       = 100
+MAX_CELL_LENGTH  = 50000  # sécurité pour Google Sheets
 
 HEADERS: List[str] = [
     "activityId", "activityName", "activityTypeId", "parentActivityTypeId",
@@ -117,28 +118,24 @@ def merge_data(details: dict, flat: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Construction de la ligne à injecter dans Sheets
 # ---------------------------------------------------------------------------
-def build_row(data: dict) -> List[Any]:
+def build_row(data: Dict[str, Any]) -> List[Any]:
+    """Prépare une ligne en appliquant les conversions nécessaires."""
     stride = compute_stride_length(data.get("distance", 0), data.get("totalSteps", 0))
-    pace   = compute_pace_min_per_km(data.get("averageSpeed", 0))
-    splits = json.dumps(data.get("splitsJSON", []))
-    return [
-        data["activityId"], data["activityName"], data["activityTypeId"],
-        data["parentActivityTypeId"], data["eventTypeId"], data["manualActivity"],
-        data["favorite"], data["personalRecord"], data["startTimeLocal"],
-        data["startTimeGMT"], data["activityTimestampMs"], data["duration"],
-        data["movingDuration"], data["elapsedDuration"], data["timezoneOffset"],
-        data["distance"], data["averageSpeed"], data["maxSpeed"],
-        stride, pace, data["totalElevationGain"], data["totalElevationLoss"],
-        data["minElevation"], data["maxElevation"], data["startLatitude"],
-        data["startLongitude"], data["endLatitude"], data["endLongitude"],
-        data["averageHeartRate"], data["maxHeartRate"], data["averageCadence"],
-        data["maxCadence"], data["totalSteps"], data["vo2MaxValue"],
-        data["activeKilocalories"], data["bmrKilocalories"], data["bodyBatteryDelta"],
-        data["hrZone1Seconds"], data["hrZone2Seconds"], data["hrZone3Seconds"],
-        data["hrZone4Seconds"], data["hrZone5Seconds"],
-        data["moderateIntensityMinutes"], data["vigorousIntensityMinutes"],
-        data["hydrationConsumedMl"], splits
-    ]
+    pace = compute_pace_min_per_km(data.get("averageSpeed", 0))
+
+    enriched = {
+        **data,
+        "averageStrideLength": stride,
+        "averagePaceMinPerKm": pace,
+    }
+
+    row: List[Any] = []
+    for col in HEADERS:
+        val = enriched.get(col, "")
+        if isinstance(val, (dict, list)):
+            val = json.dumps(val, ensure_ascii=False)[:MAX_CELL_LENGTH]
+        row.append(val)
+    return row
 
 # ---------------------------------------------------------------------------
 # Google Sheets : chargement et gestion des en-têtes
